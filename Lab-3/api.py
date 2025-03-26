@@ -1,75 +1,99 @@
 from flask import Flask, request, jsonify
-from cipher.rsa import RSACipher
+import rsa
+import os
 
 app = Flask(__name__)
 
-# RSA CIPHER ALGORITHM
-rsa_cipher = RSACipher()
+KEY_FOLDER = "keys"
+PUBLIC_KEY_PATH = os.path.join(KEY_FOLDER, "publicKey.pem")
+PRIVATE_KEY_PATH = os.path.join(KEY_FOLDER, "privateKey.pem")
 
-@app.route('/api/rsa/generate_keys', methods=['GET'])
-def rsa_generate_keys():
-    rsa_cipher.generate_keys()
-    return jsonify({'message': 'Keys generated successfully'})
+def generate_and_save_keys():
+    if not os.path.exists(KEY_FOLDER):
+        os.makedirs(KEY_FOLDER)
+
+    if not os.path.exists(PUBLIC_KEY_PATH) or not os.path.exists(PRIVATE_KEY_PATH):
+        public_key, private_key = rsa.newkeys(512)
+
+        with open(PUBLIC_KEY_PATH, "wb") as pub_file:
+            pub_file.write(public_key.save_pkcs1())
+
+        with open(PRIVATE_KEY_PATH, "wb") as priv_file:
+            priv_file.write(private_key.save_pkcs1())
+
+        return public_key, private_key
+    else:
+        with open(PUBLIC_KEY_PATH, "rb") as pub_file:
+            public_key = rsa.PublicKey.load_pkcs1(pub_file.read())
+
+        with open(PRIVATE_KEY_PATH, "rb") as priv_file:
+            private_key = rsa.PrivateKey.load_pkcs1(priv_file.read())
+
+        return public_key, private_key
+
+# Load hoặc tạo khóa
+public_key, private_key = generate_and_save_keys()
+
+@app.route("/api/rsa/generate_keys", methods=["GET"])
+def generate_keys():
+    """ API tạo khóa RSA """
+    return jsonify({
+        "message": "Keys generated successfully"
+    })
 
 @app.route("/api/rsa/encrypt", methods=["POST"])
-def rsa_encrypt():
+def encrypt():
+    """ API mã hóa chuỗi bằng khóa công khai """
     data = request.json
-    message = data['message']
-    key_type = data['key_type']
-    private_key, public_key = rsa_cipher.load_keys()
-    
-    if key_type == 'public':
-        key = public_key
-    elif key_type == 'private':
-        key = private_key
-    else:
-        return jsonify({'error': 'Invalid key type'})
+    message = data.get("message", "").encode()
 
-    encrypted_message = rsa_cipher.encrypt(message, key)
-    encrypted_hex = encrypted_message.hex()
-    
-    return jsonify({'encrypted_message': encrypted_hex})
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+
+    encrypted_msg = rsa.encrypt(message, public_key)
+    return jsonify({"encrypted_message": encrypted_msg.hex()})
 
 @app.route("/api/rsa/decrypt", methods=["POST"])
-def rsa_decrypt():
+def decrypt():
+    """ API giải mã chuỗi bằng khóa riêng """
     data = request.json
-    ciphertext_hex = data['ciphertext']
-    key_type = data['key_type']
-    private_key, public_key = rsa_cipher.load_keys()
+    if not data or "cipher_text" not in data:
+        return jsonify({"error": "Encrypted message is required"}), 400
 
-    if key_type == 'public':
-        key = public_key
-    elif key_type == 'private':
-        key = private_key
-    else:
-        return jsonify({'error': 'Invalid key type'})
-
-    decrypted_message = rsa_cipher.decrypt(ciphertext_hex, key)
-    return jsonify({'decrypted_message': decrypted_message})
+    try:
+        encrypted_bytes = bytes.fromhex(data["cipher_text"])
+        decrypted_msg = rsa.decrypt(encrypted_bytes, private_key).decode()
+        return jsonify({"decrypted_message": decrypted_msg})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
 
 @app.route("/api/rsa/sign", methods=["POST"])
-def rsa_sign():
+def sign():
+    """ API ký số một thông điệp """
     data = request.json
-    message = data['message']
-    private_key, public_key = rsa_cipher.load_keys()
-    
-    signature = rsa_cipher.sign(message, private_key)
-    signature_hex = signature.hex()
-    
-    return jsonify({'signature': signature_hex})
+    message = data.get("message", "").encode()
+
+    if not message:
+        return jsonify({"error": "Message is required"}), 400
+
+    signature = rsa.sign(message, private_key, 'SHA-256')
+    return jsonify({"signature": signature.hex()})
 
 @app.route("/api/rsa/verify", methods=["POST"])
-def rsa_verify_signature():
+def verify():
+    """ API xác minh chữ ký của thông điệp """
     data = request.json
-    message = data['message']
-    signature_hex = data['signature']
-    
-    public_key = rsa_cipher.load_keys()[1]
-    signature = bytes.fromhex(signature_hex)
-    
-    is_verified = rsa_cipher.verify(message, signature, public_key)
-    
-    return jsonify({'is_verified': is_verified})
+    message = data.get("message", "").encode()
+    signature = data.get("signature", "")
+
+    if not message or not signature:
+        return jsonify({"error": "Message and signature are required"}), 400
+
+    try:
+        rsa.verify(message, bytes.fromhex(signature), public_key)
+        return jsonify({"verified": True})
+    except rsa.VerificationError:
+        return jsonify({"verified": False}), 400
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(debug=True)

@@ -1,4 +1,7 @@
 import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
+
 from PyQt5.QtWidgets import QApplication, QMainWindow, QMessageBox
 from ui.rsa import Ui_MainWindow
 import requests
@@ -32,7 +35,7 @@ class MyApp(QMainWindow):
     def call_api_encrypt(self):
         url = "http://127.0.0.1:5000/api/rsa/encrypt"
         payload = {
-            "message": self.ui.txt_plain_text.toPlainText(),
+            "message": self.ui.txt_plaint_text.toPlainText(),
             "key_type": "public"
         }
         try:
